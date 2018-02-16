@@ -1,46 +1,75 @@
 package com.ing.software.ticketapp;
 
-import android.app.AlertDialog;
+import android.app.DialogFragment;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import org.w3c.dom.Text;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.DecimalFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Locale;
 
 import database.DataManager;
+import database.MissionEntity;
 import database.TicketEntity;
+
 
 public class EditTicket extends AppCompatActivity {
 
     public DataManager DB;
-    int ticketId;
+    int ticketID;
+    int missionID;
     Context context;
     TicketEntity thisTicket;
-    String ticketTitle = "", ticketDate = "", ticketAmount = "", ticketShop = "", ticketPath = "";
+    MissionEntity thisMission;
+    String ticketTitle = "", ticketAmount = "", ticketShop = "", ticketPath = "", ticketDateString = "";
+    Date ticketDate;
     TextView txtTitle;
     TextView txtAmount;
     TextView txtShop;
     TextView txtDate;
+    Intent intent;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getSupportActionBar().setElevation(0);
-        setTitle(getString(R.string.edit_ticket));
-        setContentView(R.layout.activity_edit_ticket);
-        DB = new DataManager(this.getApplicationContext());
         context = this.getApplicationContext();
+        setTitle(context.getString(R.string.title_EditTicket));
+        setContentView(R.layout.activity_edit_ticket);
+
+        DB = new DataManager(this.getApplicationContext());
+        ticketID = Singleton.getInstance().getTicketID();
+        missionID = Singleton.getInstance().getMissionID();
+        thisTicket = DB.getTicket(ticketID);
+        thisMission = DB.getMission(missionID);
+        TextView editDate=(TextView)findViewById(R.id.input_ticketDateMod);
+        LinearLayout bntMissionStart = (LinearLayout)findViewById(R.id.buttonEditTicketDate);
+        bntMissionStart.setOnClickListener(new View.OnClickListener() {
+            //lazzarin
+            public void onClick(View v) {
+                Singleton.getInstance().setStartFlag(2);
+                DialogFragment newFragment = new DatePickerFragment().newInstance(editDate);
+                newFragment.show(getFragmentManager(), "startDatePicker");
+            }
+        });
+
 
         //Get data from parent view
         setTicketValues();
@@ -71,34 +100,71 @@ public class EditTicket extends AppCompatActivity {
         switch (item.getItemId()) {
             case R.id.action_confirm:
                 //Salva i file nel DB
-                SimpleDateFormat format = new SimpleDateFormat("dd/MM/yyyy", Locale.US);
+
                 thisTicket.setTitle(txtTitle.getText().toString());
+                /**
+                 * lazzarin (Cleaned by Dal Maso)
+                 */
+                SimpleDateFormat dateformat = new SimpleDateFormat("dd/MM/yyyy");
                 try {
-                    thisTicket.setDate(format.parse(txtDate.getText().toString()));
+                    MissionEntity current = DB.getMission(missionID);
+                    String  start=dateformat.format(current.getStartDate());
+
+                    String finish=dateformat.format(current.getEndDate());
+                    
+                    if( AppUtilities.checkIntervalDate(start,finish,txtDate.getText().toString()))
+                        thisTicket.setDate(dateformat.parse(txtDate.getText().toString()));
+                    else {
+                        Toast.makeText(context, getResources().getString(R.string.toast_errorIntervalDate), Toast.LENGTH_SHORT).show();
+                        break;
+                    }
                 } catch (ParseException e) {
                     e.printStackTrace();
                 }
-                thisTicket.setShop(txtShop.getText().toString());
-                try {
-                    thisTicket.setAmount(new BigDecimal(txtAmount.getText().toString().replaceAll(",", ".").replaceAll(" ", "")));
-                } catch (NumberFormatException e) {
-                    AlertDialog.Builder builder;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        builder = new AlertDialog.Builder(EditTicket.this, android.R.style.Theme_Material_Light_Dialog_Alert);
-                    } else {
-                        builder = new AlertDialog.Builder(EditTicket.this);
-                    }
-                    builder.setTitle(getString(R.string.alert_invalid_amount_title))
-                            .setMessage(R.string.alert_invalid_amount_mess)
-                            .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                                // do nothing
-                            })
-                            .show();
+
+                if(txtShop.getText().toString().replace(" ","").compareTo("") != 0) {
+                    thisTicket.setShop(txtShop.getText().toString());
                 }
+
+                /**
+                 * Mantovan Federico
+                 * Check entry amount
+                 */
+
+                int count = 0;
+                String amount = txtAmount.getText().toString();
+                for(int i = 0; i < amount.length(); i++){
+                    char character = amount.charAt(i);
+                    String letter = character + "";
+                    if(letter.equals(".")){
+                        count++;
+                    }
+                }
+
+
+                if(count > 0 && amount.length() - count == 0){ //Point (>1) and not number
+                    Toast.makeText(context, getResources().getString(R.string.toast_multiPoint_noNumber), Toast.LENGTH_SHORT).show();
+                    break;
+                }
+                if(count > 1){ //Point and number (>1)
+                    Toast.makeText(context, getResources().getString(R.string.toast_multiPoint), Toast.LENGTH_SHORT).show();
+                    break;
+                }
+                if (count <= 1){ //Zero or one point and number (>= 1)
+                    if(amount.length() != 0){
+                        if(Double.parseDouble(amount) > 9999){
+                            Toast.makeText(context, getResources().getString(R.string.toast_tooHightTotal), Toast.LENGTH_SHORT).show();
+                            break;
+                        }
+                        else
+                            thisTicket.setAmount(BigDecimal.valueOf(Double.parseDouble(txtAmount.getText().toString())));
+                    }
+                }
+
                 DB.updateTicket(thisTicket);
                 Intent intent = new Intent();
                 setResult(RESULT_OK, intent);
-                //finish();
+                finish();
                 break;
 
             default:
@@ -108,30 +174,42 @@ public class EditTicket extends AppCompatActivity {
         return true;
     }
 
+    /** Dal Maso
+     * set the current values on the variables
+     */
     private void setTicketValues(){
-        Intent intent = getIntent();
-        ticketId = (int) intent.getExtras().getLong("ticketID");
-        Log.d("TicketID", "Edit ticket "+ticketId);
-        thisTicket = DB.getTicket(ticketId);
+
         ticketPath = thisTicket.getFileUri().toString().substring(7);
         ticketTitle = thisTicket.getTitle();
-        ticketDate = thisTicket.getDate().toString();
-        if (thisTicket.getAmount() != null)
-            ticketAmount = thisTicket.getAmount().setScale(2, RoundingMode.HALF_UP).toString();
-        ticketShop = thisTicket.getShop();
+        ticketDate = thisTicket.getDate();
+        if(thisTicket.getAmount() == null){
+            ticketAmount = "";
+        }
+        else {
+            ticketAmount = thisTicket.getAmount().setScale(2, RoundingMode.HALF_EVEN).toString();
+        }
+        if(thisTicket.getShop() == null){
+            ticketShop = "";
+        }
+        else {
+            ticketShop = thisTicket.getShop();
+        }
 
         //set those values to the edittext
         setTicketValuesOnScreen();
     }
 
+    /** Dal Maso
+     * set the current values on the edittexts
+     */
     private void setTicketValuesOnScreen(){
         txtTitle = (TextView)findViewById(R.id.input_ticketTitleMod);
         txtAmount = (TextView)findViewById(R.id.input_ticketAmountMod);
         txtShop = (TextView)findViewById(R.id.input_ticketShopMod);
         txtDate = (TextView)findViewById(R.id.input_ticketDateMod);
-
+        SimpleDateFormat formatter = new SimpleDateFormat("dd/MM/yyyy");
+        txtDate.setText(formatter.format(ticketDate));
         txtTitle.setText(ticketTitle);
-        txtDate.setText(ticketDate);
         txtShop.setText(ticketShop);
         txtAmount.setText(ticketAmount);
     }
